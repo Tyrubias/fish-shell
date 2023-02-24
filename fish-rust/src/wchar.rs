@@ -4,6 +4,7 @@
 //!   - wstr: a string slice without a nul terminator. Like `&str` but wide chars.
 //!   - WString: an owning string without a nul terminator. Like `String` but wide chars.
 
+use crate::expand::SpecialUnicodeValues;
 use crate::ffi;
 pub use cxx::CxxWString;
 pub use ffi::{wchar_t, wcharz_t};
@@ -34,6 +35,18 @@ pub use widestring_suffix::widestrs;
 /// Pull in our extensions.
 pub use crate::wchar_ext::{CharPrefixSuffix, WExt};
 
+// Use Unicode "non-characters" for internal characters as much as we can. This
+// gives us 32 "characters" for internal use that we can guarantee should not
+// appear in our input stream. See http://www.unicode.org/faq/private_use.html.
+pub(crate) const RESERVED_CHAR_BASE: u32 = 0xFDD0;
+pub(crate) const RESERVED_CHAR_END: u32 = 0xFDF0;
+// Split the available non-character values into two ranges to ensure there are
+// no conflicts among the places we use these special characters.
+pub(crate) const EXPAND_RESERVED_BASE: u32 = RESERVED_CHAR_BASE;
+pub(crate) const EXPAND_RESERVED_END: u32 = EXPAND_RESERVED_BASE + 16;
+pub(crate) const WILDCARD_RESERVED_BASE: u32 = EXPAND_RESERVED_END;
+pub(crate) const WILDCARD_RESERVED_END: u32 = WILDCARD_RESERVED_BASE + 16;
+
 // These are in the Unicode private-use range. We really shouldn't use this
 // range but have little choice in the matter given how our lexer/parser works.
 // We can't use non-characters for these two ranges because there are only 66 of
@@ -59,4 +72,19 @@ const ENCODE_DIRECT_END: u32 = ENCODE_DIRECT_BASE + 256;
 pub fn wchar_literal_byte(byte: u8) -> char {
     char::from_u32(ENCODE_DIRECT_BASE + u32::from(byte))
         .expect("private-use codepoint should be valid char")
+}
+
+pub fn wchar_to_byte(wchar: char) -> Vec<u8> {
+    let mut converted = [0u8; 4];
+    let wc = wchar as u32;
+    if let Ok(SpecialUnicodeValues::InternalSeparator) = SpecialUnicodeValues::try_from(wc) {
+        return vec![];
+    } else if (ENCODE_DIRECT_BASE..ENCODE_DIRECT_END).contains(&wc) {
+        // This should never fail because we know the range of `wc`
+        return vec![(wc - ENCODE_DIRECT_BASE)
+            .try_into()
+            .expect("codepoint should be in ASCII range")];
+    } else {
+        return wchar.encode_utf8(&mut converted).as_bytes().to_vec();
+    }
 }

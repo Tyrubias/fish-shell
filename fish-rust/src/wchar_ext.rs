@@ -1,4 +1,4 @@
-use crate::wchar::{wstr, WString};
+use crate::wchar::{wchar_to_byte, wstr, WString};
 use widestring::utfstr::CharsUtf32;
 
 /// A thing that a wide string can start with or end with.
@@ -88,6 +88,18 @@ pub trait WExt {
             self.as_char_slice().iter().copied().rev(),
         )
     }
+
+    /// Equivalent of `basic_string.rfind()` from C++
+    fn rfind(&self, c: char) -> Option<usize> {
+        self.as_char_slice().iter().rposition(|&x| x == c)
+    }
+
+    fn to_narrow_bytes(&self) -> Vec<u8> {
+        self.as_char_slice()
+            .iter()
+            .flat_map(|&c| wchar_to_byte(c))
+            .collect()
+    }
 }
 
 impl WExt for WString {
@@ -102,6 +114,23 @@ impl WExt for wstr {
     }
 }
 
+fn wstring_from_narrow_bytes(bytes: &[u8]) -> WString {
+    if bytes.is_empty() {
+        return WString::new();
+    }
+
+    let mut result = WString::with_capacity(bytes.len());
+    let mut it = bytes.iter().peekable();
+
+    while let Some(&b) = it.next_if(|&b| b.is_ascii()) {
+        result.push(char::from(b));
+    }
+
+    for 
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::WExt;
@@ -113,6 +142,16 @@ mod tests {
         assert_eq!(Some(1), L!("abc").find_char('b'));
         assert_eq!(None, L!("abc").find_char('X'));
         assert_eq!(None, L!("").find_char('X'));
+    }
+
+    #[cfg(test)]
+    fn test_rfind() {
+        assert_eq!(Some(3), L!("a/b/c").rfind('/'));
+        assert_eq!(Some(2), L!("a/b/c").rfind('b'));
+        assert_eq!(Some(0), L!("a/b/c").rfind('a'));
+        assert_eq!(None, L!("a/b/c").rfind('z'));
+        assert_eq!(None, L!("").rfind('z'));
+        assert_eq!(None, WString::new().rfind('a'));
     }
 
     #[cfg(test)]
